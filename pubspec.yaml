@@ -35,6 +35,20 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
 
+  # ML Pose Detection
+  google_mlkit_pose_detection: ^0.14.0
+  camera: ^0.11.0+2
+
+  # Foreground App Detection
+  usage_stats: ^1.3.0
+
+  # Permissions (including overlay permissions)
+  permission_handler: ^11.3.1
+
+  # Additional Utilities
+  shared_preferences: ^2.2.2
+  introduction_screen: ^3.1.14
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -1,0 +1,31 @@
+PACKAGES USED IN MOVE3SCROLL PROJECT
+=====================================
+
+ML POSE DETECTION
+-----------------
+- google_mlkit_pose_detection: ^0.14.0
+  Purpose: Google's ML Kit for pose detection
+  
+- camera: ^0.11.0+2
+  Purpose: Camera plugin to capture video feed for pose analysis
+
+
+FOREGROUND APP DETECTION
+-------------------------
+- usage_stats: ^1.3.0
+  Purpose: Tracks which apps are in the foreground/being used
+
+
+FORCED APP APPEARANCE (OVERLAY/PERMISSIONS)
+--------------------------------------------
+- permission_handler: ^11.3.1
+  Purpose: Handles runtime permissions (including overlay permissions to keep the app on top)
+
+
+ADDITIONAL RELATED PACKAGES
+----------------------------
+- shared_preferences: ^2.2.2
+  Purpose: For persisting app settings/state
+  
+- introduction_screen: ^3.1.14
+  Purpose: For onboarding/introduction screens

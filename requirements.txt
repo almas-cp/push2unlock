@@ -1,0 +1,40 @@
+this app have these main pages:
+<onboarding page> (shows only once during first run)
+2 slides only
+
+slide 1 
+a small description of the app
+
+slide 2 
+ask for camera permissions
+
+<dashboard page>
+
+a button named "earn scroll time"
+
+a list of monitored apps
+
+a play/pause symbol button on the bottom right to start and stop service of the app
+
+
+<settings page>
+
+monitored apps list
+(multiple selection)
+instagram (selected by default)
+x (selected by default)
+youtube
+ add new app button which lists all apps with search filter function
+
+ reward time
+ 5, 10 , 15 20 25  30 minutes
+
+ excercise type
+ head nods
+ squats
+ pushups
+ 
+ excercise rep counts
+ 5 , 10 , 15 , 20
+
+ camera permissions status

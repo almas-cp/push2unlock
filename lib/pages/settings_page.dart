@@ -10,7 +10,24 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  final List<String> _availableApps = ['Instagram', 'X', 'YouTube'];
+  final List<String> _popularApps = [
+    'Instagram',
+    'X',
+    'YouTube',
+    'Facebook',
+    'TikTok',
+    'Snapchat',
+    'Reddit',
+    'WhatsApp',
+    'Telegram',
+    'Discord',
+    'LinkedIn',
+    'Netflix',
+    'Prime Video',
+    'Disney+',
+    'Spotify',
+    'Twitter',
+  ];
   List<String> _selectedApps = [];
   int _selectedRewardTime = 10;
   String _selectedExercise = 'Head Nods';
@@ -57,24 +74,19 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   void _showAddAppDialog() {
-    final unselectedApps = _availableApps
+    final unselectedApps = _popularApps
         .where((app) => !_selectedApps.contains(app))
         .toList();
-
-    if (unselectedApps.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('All apps are already selected')),
-      );
-      return;
-    }
 
     showDialog(
       context: context,
       builder: (context) => _AddAppDialog(
-        availableApps: unselectedApps,
+        popularApps: unselectedApps,
         onAppSelected: (app) {
           setState(() {
-            _selectedApps.add(app);
+            if (!_selectedApps.contains(app)) {
+              _selectedApps.add(app);
+            }
           });
           _saveSettings();
         },
@@ -295,9 +307,30 @@ class _SettingsPageState extends State<SettingsPage> {
       case 'instagram':
         return Icons.camera_alt;
       case 'x':
+      case 'twitter':
         return Icons.close;
       case 'youtube':
         return Icons.play_circle_fill;
+      case 'facebook':
+        return Icons.thumb_up;
+      case 'tiktok':
+        return Icons.music_note;
+      case 'snapchat':
+        return Icons.camera;
+      case 'reddit':
+        return Icons.forum;
+      case 'whatsapp':
+      case 'telegram':
+      case 'discord':
+        return Icons.message;
+      case 'linkedin':
+        return Icons.work;
+      case 'netflix':
+      case 'prime video':
+      case 'disney+':
+        return Icons.movie;
+      case 'spotify':
+        return Icons.music_note;
       default:
         return Icons.apps;
     }
@@ -305,11 +338,11 @@ class _SettingsPageState extends State<SettingsPage> {
 }
 
 class _AddAppDialog extends StatefulWidget {
-  final List<String> availableApps;
+  final List<String> popularApps;
   final Function(String) onAppSelected;
 
   const _AddAppDialog({
-    required this.availableApps,
+    required this.popularApps,
     required this.onAppSelected,
   });
 
@@ -320,20 +353,40 @@ class _AddAppDialog extends StatefulWidget {
 class _AddAppDialogState extends State<_AddAppDialog> {
   String _searchQuery = '';
   List<String> _filteredApps = [];
+  final TextEditingController _customAppController = TextEditingController();
+  bool _showCustomInput = false;
 
   @override
   void initState() {
     super.initState();
-    _filteredApps = widget.availableApps;
+    _filteredApps = widget.popularApps;
+  }
+
+  @override
+  void dispose() {
+    _customAppController.dispose();
+    super.dispose();
   }
 
   void _filterApps(String query) {
     setState(() {
       _searchQuery = query;
-      _filteredApps = widget.availableApps
+      _filteredApps = widget.popularApps
           .where((app) => app.toLowerCase().contains(query.toLowerCase()))
           .toList();
     });
+  }
+
+  void _addCustomApp() {
+    final appName = _customAppController.text.trim();
+    if (appName.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter an app name')),
+      );
+      return;
+    }
+    widget.onAppSelected(appName);
+    Navigator.pop(context);
   }
 
   @override
@@ -345,35 +398,84 @@ class _AddAppDialogState extends State<_AddAppDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(
-              decoration: const InputDecoration(
-                hintText: 'Search apps...',
-                prefixIcon: Icon(Icons.search),
-                border: OutlineInputBorder(),
-              ),
-              onChanged: _filterApps,
+            // Toggle buttons for Popular vs Custom
+            SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(
+                  value: false,
+                  label: Text('Popular Apps'),
+                  icon: Icon(Icons.apps),
+                ),
+                ButtonSegment(
+                  value: true,
+                  label: Text('Custom'),
+                  icon: Icon(Icons.edit),
+                ),
+              ],
+              selected: {_showCustomInput},
+              onSelectionChanged: (Set<bool> newSelection) {
+                setState(() {
+                  _showCustomInput = newSelection.first;
+                });
+              },
             ),
             const SizedBox(height: 16),
-            Flexible(
-              child: _filteredApps.isEmpty
-                  ? const Center(
-                      child: Text('No apps found'),
-                    )
-                  : ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: _filteredApps.length,
-                      itemBuilder: (context, index) {
-                        final app = _filteredApps[index];
-                        return ListTile(
-                          title: Text(app),
-                          onTap: () {
-                            widget.onAppSelected(app);
-                            Navigator.pop(context);
-                          },
-                        );
-                      },
-                    ),
-            ),
+            
+            // Show either popular apps list or custom input
+            if (!_showCustomInput) ...[
+              TextField(
+                decoration: const InputDecoration(
+                  hintText: 'Search apps...',
+                  prefixIcon: Icon(Icons.search),
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: _filterApps,
+              ),
+              const SizedBox(height: 16),
+              Flexible(
+                child: _filteredApps.isEmpty
+                    ? const Center(
+                        child: Text('No apps found'),
+                      )
+                    : ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: _filteredApps.length,
+                        itemBuilder: (context, index) {
+                          final app = _filteredApps[index];
+                          return ListTile(
+                            leading: Icon(_getAppIcon(app)),
+                            title: Text(app),
+                            onTap: () {
+                              widget.onAppSelected(app);
+                              Navigator.pop(context);
+                            },
+                          );
+                        },
+                      ),
+              ),
+            ] else ...[
+              // Custom app input
+              TextField(
+                controller: _customAppController,
+                decoration: const InputDecoration(
+                  labelText: 'App Name',
+                  hintText: 'e.g., Chrome, Gmail, etc.',
+                  border: OutlineInputBorder(),
+                  helperText: 'Enter the app name to monitor',
+                ),
+                textCapitalization: TextCapitalization.words,
+                onSubmitted: (_) => _addCustomApp(),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _addCustomApp,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add Custom App'),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -384,5 +486,39 @@ class _AddAppDialogState extends State<_AddAppDialog> {
         ),
       ],
     );
+  }
+
+  IconData _getAppIcon(String appName) {
+    switch (appName.toLowerCase()) {
+      case 'instagram':
+        return Icons.camera_alt;
+      case 'x':
+      case 'twitter':
+        return Icons.close;
+      case 'youtube':
+        return Icons.play_circle_fill;
+      case 'facebook':
+        return Icons.thumb_up;
+      case 'tiktok':
+        return Icons.music_note;
+      case 'snapchat':
+        return Icons.camera;
+      case 'reddit':
+        return Icons.forum;
+      case 'whatsapp':
+      case 'telegram':
+      case 'discord':
+        return Icons.message;
+      case 'linkedin':
+        return Icons.work;
+      case 'netflix':
+      case 'prime video':
+      case 'disney+':
+        return Icons.movie;
+      case 'spotify':
+        return Icons.music_note;
+      default:
+        return Icons.apps;
+    }
   }
 }

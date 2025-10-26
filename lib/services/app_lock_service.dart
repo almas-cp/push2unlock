@@ -193,14 +193,24 @@ class AppLockService {
     if (packageName.contains('facebook')) return 'Facebook';
     if (packageName.contains('tiktok')) return 'TikTok';
     if (packageName.contains('snapchat')) return 'Snapchat';
+    if (packageName.contains('reddit')) return 'Reddit';
+    if (packageName.contains('whatsapp')) return 'WhatsApp';
+    if (packageName.contains('telegram')) return 'Telegram';
+    if (packageName.contains('discord')) return 'Discord';
+    if (packageName.contains('linkedin')) return 'LinkedIn';
+    if (packageName.contains('netflix')) return 'Netflix';
+    if (packageName.contains('primevideo') || packageName.contains('amazon')) return 'Prime Video';
+    if (packageName.contains('disney')) return 'Disney+';
+    if (packageName.contains('spotify')) return 'Spotify';
+    if (packageName.contains('chrome')) return 'Chrome';
+    if (packageName.contains('gmail')) return 'Gmail';
     
     // Default: capitalize first letter of last segment
     final parts = packageName.split('.');
     if (parts.isNotEmpty) {
-      final name = parts.last;
-      return name[0].toUpperCase() + name.substring(1);
+      return parts.last[0].toUpperCase() + parts.last.substring(1);
     }
-    return 'App';
+    return 'Unknown App';
   }
 
   Future<void> _bringAppToForeground() async {

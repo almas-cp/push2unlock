@@ -8,8 +8,13 @@ class PushupsDetector {
 
   int _currentReps = 0;
   bool _isPushingDown = false;
-  static const double _downAngleThreshold = 90.0; // degrees
-  static const double _upAngleThreshold = 150.0; // degrees
+  double? _previousShoulderY;
+  double? _topShoulderY; // Reference Y when in plank/up position
+  static const double _pushupDepthThreshold = 40.0; // pixels of vertical movement
+  
+  // Throttling for logs
+  DateTime? _lastLogTime;
+  static const Duration _logThrottle = Duration(milliseconds: 200);
 
   PushupsDetector({
     required this.targetReps,
@@ -18,60 +23,82 @@ class PushupsDetector {
   });
 
   void processPose(Pose pose) {
-    // Get landmarks for arms
-    final leftShoulder = pose.landmarks[PoseLandmarkType.leftShoulder];
-    final leftElbow = pose.landmarks[PoseLandmarkType.leftElbow];
-    final leftWrist = pose.landmarks[PoseLandmarkType.leftWrist];
+    final now = DateTime.now();
+    final shouldLog = _lastLogTime == null || now.difference(_lastLogTime!) >= _logThrottle;
     
+    // Get shoulder landmarks
+    final leftShoulder = pose.landmarks[PoseLandmarkType.leftShoulder];
     final rightShoulder = pose.landmarks[PoseLandmarkType.rightShoulder];
-    final rightElbow = pose.landmarks[PoseLandmarkType.rightElbow];
-    final rightWrist = pose.landmarks[PoseLandmarkType.rightWrist];
-
-    // Check if all landmarks are detected with good confidence
-    if (leftShoulder == null || leftElbow == null || leftWrist == null ||
-        rightShoulder == null || rightElbow == null || rightWrist == null) {
+    
+    // Need both shoulders detected
+    if (leftShoulder == null || rightShoulder == null) {
+      if (shouldLog) {
+        print('⚠️ [Pushups] Shoulders not detected');
+        _lastLogTime = now;
+      }
+      return;
+    }
+    
+    if (leftShoulder.likelihood < 0.7 || rightShoulder.likelihood < 0.7) {
+      if (shouldLog) {
+        print('⚠️ [Pushups] Low confidence - Left: ${(leftShoulder.likelihood * 100).toStringAsFixed(0)}%, Right: ${(rightShoulder.likelihood * 100).toStringAsFixed(0)}%');
+        _lastLogTime = now;
+      }
       return;
     }
 
-    if (leftShoulder.likelihood < 0.6 || leftElbow.likelihood < 0.6 || leftWrist.likelihood < 0.6 ||
-        rightShoulder.likelihood < 0.6 || rightElbow.likelihood < 0.6 || rightWrist.likelihood < 0.6) {
+    // Calculate average shoulder Y position (vertical position)
+    final currentShoulderY = (leftShoulder.y + rightShoulder.y) / 2;
+    
+    // Initialize top position (plank position) on first detection
+    if (_topShoulderY == null) {
+      _topShoulderY = currentShoulderY;
+      print('🔄 [Pushups] Initializing... Top (plank) shoulder position: ${currentShoulderY.toStringAsFixed(1)}');
+      _previousShoulderY = currentShoulderY;
       return;
     }
-
-    // Calculate elbow angles for both arms
-    final leftElbowAngle = _calculateAngle(
-      Point(leftShoulder.x, leftShoulder.y),
-      Point(leftElbow.x, leftElbow.y),
-      Point(leftWrist.x, leftWrist.y),
-    );
-
-    final rightElbowAngle = _calculateAngle(
-      Point(rightShoulder.x, rightShoulder.y),
-      Point(rightElbow.x, rightElbow.y),
-      Point(rightWrist.x, rightWrist.y),
-    );
-
-    // Use average of both arms
-    final avgElbowAngle = (leftElbowAngle + rightElbowAngle) / 2;
-
-    // Detect pushup down
-    if (!_isPushingDown && avgElbowAngle < _downAngleThreshold) {
-      _isPushingDown = true;
-      print('⬇️ Pushup down detected (angle: ${avgElbowAngle.toStringAsFixed(1)}°)');
+    
+    if (shouldLog) {
+      print('📍 [Pushups] Left Shoulder: (${leftShoulder.x.toStringAsFixed(0)}, ${leftShoulder.y.toStringAsFixed(0)}) | Right Shoulder: (${rightShoulder.x.toStringAsFixed(0)}, ${rightShoulder.y.toStringAsFixed(0)})');
+      print('📐 [Pushups] Avg Shoulder Y: ${currentShoulderY.toStringAsFixed(1)} | Top Y: ${_topShoulderY!.toStringAsFixed(1)} | Confidence: L${(leftShoulder.likelihood * 100).toStringAsFixed(0)}% R${(rightShoulder.likelihood * 100).toStringAsFixed(0)}%');
     }
-    // Detect pushup up (rep complete)
-    else if (_isPushingDown && avgElbowAngle > _upAngleThreshold) {
-      _isPushingDown = false;
-      _currentReps++;
-      print('✅ Pushup completed! Reps: $_currentReps');
+
+    if (_previousShoulderY != null) {
+      // Calculate vertical movement from top position
+      // In pushups, Y increases when going down (moving away from top of frame)
+      final verticalDrop = currentShoulderY - _topShoulderY!;
+      final deltaY = currentShoulderY - _previousShoulderY!;
       
-      onRepComplete(_currentReps);
+      if (shouldLog) {
+        print('📊 [Pushups] Vertical Drop: ${verticalDrop.toStringAsFixed(1)}px | Delta Y: ${deltaY.toStringAsFixed(1)}px | Threshold: $_pushupDepthThreshold px | State: ${_isPushingDown ? "DOWN" : "UP"}');
+        _lastLogTime = now;
+      }
 
-      if (_currentReps >= targetReps) {
-        print('🎉 Pushups exercise complete!');
-        onExerciseComplete();
+      // Detect pushup down (shoulders drop/move down significantly)
+      if (!_isPushingDown && verticalDrop > _pushupDepthThreshold) {
+        _isPushingDown = true;
+        print('⬇️ [Pushups] ✅ PUSHUP DOWN DETECTED! Drop: ${verticalDrop.toStringAsFixed(1)}px');
+      }
+      // Detect pushup up (shoulders return to top position)
+      else if (_isPushingDown && verticalDrop < _pushupDepthThreshold / 2) {
+        _isPushingDown = false;
+        _currentReps++;
+        print('⬆️ [Pushups] ✅ PUSHUP COMPLETED! Returned to: ${verticalDrop.toStringAsFixed(1)}px from top');
+        print('🎯 [Pushups] REP COMPLETED! Total Reps: $_currentReps/$targetReps');
+        
+        // Update top reference (in case user adjusts position slightly)
+        _topShoulderY = currentShoulderY;
+        
+        onRepComplete(_currentReps);
+
+        if (_currentReps >= targetReps) {
+          print('🎉 [Pushups] 🏆 EXERCISE COMPLETE! All $_currentReps reps done!');
+          onExerciseComplete();
+        }
       }
     }
+
+    _previousShoulderY = currentShoulderY;
   }
 
   double _calculateAngle(Point<double> a, Point<double> b, Point<double> c) {
@@ -93,5 +120,7 @@ class PushupsDetector {
   void reset() {
     _currentReps = 0;
     _isPushingDown = false;
+    _previousShoulderY = null;
+    _topShoulderY = null;
   }
 }

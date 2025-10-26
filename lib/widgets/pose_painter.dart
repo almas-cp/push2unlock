@@ -12,11 +12,6 @@ class PosePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Flip canvas horizontally to match front camera mirror
-    canvas.save();
-    canvas.translate(size.width, 0);
-    canvas.scale(-1.0, 1.0);
-    
     final paintPoint = Paint()
       ..style = PaintingStyle.fill
       ..strokeWidth = 8.0
@@ -32,10 +27,33 @@ class PosePainter extends CustomPainter {
       ..strokeWidth = 8.0
       ..color = Colors.yellow;
 
-    // Draw landmarks (points)
-    for (final landmark in pose.landmarks.values) {
-      // Only draw confident points
-      if (landmark.likelihood > 0.5) {
+    // Only draw specific landmarks (points)
+    final allowedLandmarks = [
+      // Head
+      PoseLandmarkType.nose,
+      PoseLandmarkType.leftEar,
+      PoseLandmarkType.rightEar,
+      // Shoulders
+      PoseLandmarkType.leftShoulder,
+      PoseLandmarkType.rightShoulder,
+      // Arms
+      PoseLandmarkType.leftElbow,
+      PoseLandmarkType.rightElbow,
+      PoseLandmarkType.leftWrist,
+      PoseLandmarkType.rightWrist,
+      // Torso
+      PoseLandmarkType.leftHip,
+      PoseLandmarkType.rightHip,
+      // Legs
+      PoseLandmarkType.leftKnee,
+      PoseLandmarkType.rightKnee,
+      PoseLandmarkType.leftAnkle,
+      PoseLandmarkType.rightAnkle,
+    ];
+    
+    for (final landmarkType in allowedLandmarks) {
+      final landmark = pose.landmarks[landmarkType];
+      if (landmark != null && landmark.likelihood > 0.5) {
         final point = _translatePoint(
           landmark.x,
           landmark.y,
@@ -148,27 +166,11 @@ class PosePainter extends CustomPainter {
       size,
     );
     
-    // Head connections
+    // Head connections (nose to ears only)
     _drawLine(
       canvas,
       pose,
       PoseLandmarkType.nose,
-      PoseLandmarkType.leftEye,
-      paintLine,
-      size,
-    );
-    _drawLine(
-      canvas,
-      pose,
-      PoseLandmarkType.nose,
-      PoseLandmarkType.rightEye,
-      paintLine,
-      size,
-    );
-    _drawLine(
-      canvas,
-      pose,
-      PoseLandmarkType.leftEye,
       PoseLandmarkType.leftEar,
       paintLine,
       size,
@@ -176,14 +178,11 @@ class PosePainter extends CustomPainter {
     _drawLine(
       canvas,
       pose,
-      PoseLandmarkType.rightEye,
+      PoseLandmarkType.nose,
       PoseLandmarkType.rightEar,
       paintLine,
       size,
     );
-    
-    // Restore canvas after flipping
-    canvas.restore();
   }
 
   void _drawLine(
@@ -209,12 +208,32 @@ class PosePainter extends CustomPainter {
 
   Offset _translatePoint(double x, double y, Size size) {
     // Transform coordinates from image space to canvas space
-    final scaleX = size.width / imageSize.width;
-    final scaleY = size.height / imageSize.height;
+    // Handle aspect ratio differences properly
+    
+    // Calculate scale to fit the image into the canvas while maintaining aspect ratio
+    final imageAspect = imageSize.width / imageSize.height;
+    final canvasAspect = size.width / size.height;
+    
+    double scaleX;
+    double scaleY;
+    double offsetX = 0;
+    double offsetY = 0;
+    
+    if (canvasAspect > imageAspect) {
+      // Canvas is wider than image - fit to height
+      scaleY = size.height / imageSize.height;
+      scaleX = scaleY;
+      offsetX = (size.width - (imageSize.width * scaleX)) / 2;
+    } else {
+      // Canvas is taller than image - fit to width
+      scaleX = size.width / imageSize.width;
+      scaleY = scaleX;
+      offsetY = (size.height - (imageSize.height * scaleY)) / 2;
+    }
     
     return Offset(
-      x * scaleX,
-      y * scaleY,
+      size.width - (x * scaleX + offsetX), // Mirror X coordinate
+      y * scaleY + offsetY,
     );
   }
 

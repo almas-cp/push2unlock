@@ -1,8 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:usage_stats/usage_stats.dart';
 import 'settings_page.dart';
+import 'exercise_page.dart';
+import 'blocked_app_page.dart';
 import '../services/foreground_app_detector.dart';
+import '../services/app_lock_service.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -15,13 +19,21 @@ class _DashboardPageState extends State<DashboardPage> {
   bool _isServiceRunning = false;
   List<MonitoredApp> _monitoredApps = [];
   final ForegroundAppDetector _appDetector = ForegroundAppDetector();
+  final AppLockService _appLockService = AppLockService();
   bool _hasUsagePermission = false;
+  
+  // Countdown timer state
+  DateTime? _countdownEndTime;
+  Timer? _countdownTimer;
+  String _exerciseType = 'Head Nods';
+  int _repCount = 10;
+  int _rewardTime = 10;
 
   @override
   void initState() {
     super.initState();
     print('✅ Dashboard loaded successfully!');
-    _loadMonitoredApps();
+    _loadInitialData();
     _checkUsagePermission();
   }
 
@@ -34,9 +46,51 @@ class _DashboardPageState extends State<DashboardPage> {
     print('📋 Permission state updated: $_hasUsagePermission');
   }
 
-  Future<void> _loadMonitoredApps() async {
+  // Load initial data including remaining time and countdown
+  Future<void> _loadInitialData() async {
     final prefs = await SharedPreferences.getInstance();
     final selectedApps = prefs.getStringList('selectedApps') ?? ['Instagram', 'X'];
+    
+    // Load settings
+    _exerciseType = prefs.getString('exerciseType') ?? 'Head Nods';
+    _repCount = prefs.getInt('repCount') ?? 10;
+    _rewardTime = prefs.getInt('rewardTime') ?? 10;
+    
+    // Load countdown end time
+    final endTimeMillis = prefs.getInt('countdownEndTime');
+    if (endTimeMillis != null) {
+      _countdownEndTime = DateTime.fromMillisecondsSinceEpoch(endTimeMillis);
+      
+      // Check if countdown is still valid
+      if (_countdownEndTime!.isAfter(DateTime.now())) {
+        _startCountdown();
+      } else {
+        // Countdown expired, clear it
+        _countdownEndTime = null;
+        await prefs.remove('countdownEndTime');
+      }
+    }
+    
+    setState(() {
+      _monitoredApps = selectedApps
+          .map((name) => MonitoredApp(
+                name: name,
+                icon: _getAppIcon(name),
+                timeRemaining: 0,
+              ))
+          .toList();
+    });
+  }
+
+  // Reload only settings and apps list (not remaining time)
+  Future<void> _reloadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    final selectedApps = prefs.getStringList('selectedApps') ?? ['Instagram', 'X'];
+    
+    // Load settings (but NOT remaining time)
+    _exerciseType = prefs.getString('exerciseType') ?? 'Head Nods';
+    _repCount = prefs.getInt('repCount') ?? 10;
+    _rewardTime = prefs.getInt('rewardTime') ?? 10;
     
     setState(() {
       _monitoredApps = selectedApps
@@ -100,11 +154,26 @@ class _DashboardPageState extends State<DashboardPage> {
       _isServiceRunning = !_isServiceRunning;
     });
     
-    // Start or stop foreground app monitoring
+    // Start or stop foreground app monitoring and app lock
     if (_isServiceRunning) {
       await _appDetector.startMonitoring();
+      
+      // Set up callback for when app is blocked
+      _appLockService.onAppBlocked = (appName) {
+        if (mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => BlockedAppPage(appName: appName),
+            ),
+          );
+        }
+      };
+      
+      await _appLockService.startMonitoring();
     } else {
       _appDetector.stopMonitoring();
+      _appLockService.stopMonitoring();
     }
     
     if (!mounted) return;
@@ -120,9 +189,82 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  Future<void> _startExercise() async {
+    print('🏋️ Starting exercise: $_exerciseType');
+    
+    final result = await Navigator.push<int>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ExercisePage(
+          exerciseType: _exerciseType,
+          repCount: _repCount,
+          rewardTime: _rewardTime,
+        ),
+      ),
+    );
+
+    if (result != null && result > 0) {
+      print('🎉 Exercise completed! Reward: $result minutes');
+      
+      // Calculate end time based on current time + reward minutes
+      final endTime = DateTime.now().add(Duration(minutes: result));
+      
+      setState(() {
+        _countdownEndTime = endTime;
+      });
+      
+      await _saveCountdownEndTime();
+      _startCountdown();
+    }
+  }
+
+  void _startCountdown() {
+    _countdownTimer?.cancel();
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_countdownEndTime == null || DateTime.now().isAfter(_countdownEndTime!)) {
+        // Countdown finished
+        setState(() {
+          _countdownEndTime = null;
+        });
+        _countdownTimer?.cancel();
+        _clearCountdownEndTime();
+      } else {
+        // Just trigger a rebuild to update the display
+        setState(() {});
+      }
+    });
+  }
+
+  Future<void> _saveCountdownEndTime() async {
+    if (_countdownEndTime != null) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('countdownEndTime', _countdownEndTime!.millisecondsSinceEpoch);
+    }
+  }
+
+  Future<void> _clearCountdownEndTime() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('countdownEndTime');
+  }
+
+  int _getRemainingSeconds() {
+    if (_countdownEndTime == null) return 0;
+    final remaining = _countdownEndTime!.difference(DateTime.now()).inSeconds;
+    return remaining > 0 ? remaining : 0;
+  }
+
+  String _formatTime() {
+    final seconds = _getRemainingSeconds();
+    final minutes = seconds ~/ 60;
+    final secs = seconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+  }
+
   @override
   void dispose() {
     _appDetector.dispose();
+    _appLockService.dispose();
+    _countdownTimer?.cancel();
     super.dispose();
   }
 
@@ -142,7 +284,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 context,
                 MaterialPageRoute(builder: (_) => const SettingsPage()),
               );
-              _loadMonitoredApps();
+              _reloadSettings();
             },
           ),
         ],
@@ -153,18 +295,10 @@ class _DashboardPageState extends State<DashboardPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Earn Scroll Time Button
+              // Earn Scroll Time Button or Countdown Timer
               Card(
                 child: InkWell(
-                  onTap: () {
-                    // TODO: Navigate to exercise page
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Starting exercise...'),
-                        duration: Duration(seconds: 2),
-                      ),
-                    );
-                  },
+                  onTap: _countdownEndTime != null ? null : _startExercise,
                   borderRadius: BorderRadius.circular(16),
                   child: Padding(
                     padding: const EdgeInsets.all(24.0),
@@ -174,25 +308,32 @@ class _DashboardPageState extends State<DashboardPage> {
                           width: 80,
                           height: 80,
                           decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.primary,
+                            color: _countdownEndTime != null
+                                ? Colors.green
+                                : Theme.of(context).colorScheme.primary,
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(
-                            Icons.timer,
+                          child: Icon(
+                            _countdownEndTime != null ? Icons.check_circle : Icons.fitness_center,
                             size: 40,
                             color: Colors.white,
                           ),
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'Earn Scroll Time',
+                          _countdownEndTime != null
+                              ? _formatTime()
+                              : 'Earn Scroll Time',
                           style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                                 fontWeight: FontWeight.bold,
+                                fontSize: _countdownEndTime != null ? 36 : null,
                               ),
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Complete exercises to unlock your apps',
+                          _countdownEndTime != null
+                              ? 'Time remaining for apps'
+                              : 'Complete exercises to unlock your apps',
                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                 color: Colors.grey[600],
                               ),

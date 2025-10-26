@@ -102,7 +102,10 @@ class ForegroundAppDetector {
       final packageName = currentApp.packageName ?? 'unknown';
       final appName = _getAppName(packageName);
       
-      // Only log if app changed
+      // Debug: Always log current app to see what's happening
+      print('🔍 [ForegroundAppDetector] Current app: $packageName');
+      
+      // Only log full details if app changed
       if (packageName != _lastApp) {
         _lastApp = packageName;
         final emoji = _getEmoji(packageName);

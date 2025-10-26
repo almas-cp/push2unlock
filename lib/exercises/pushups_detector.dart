@@ -8,13 +8,18 @@ class PushupsDetector {
 
   int _currentReps = 0;
   bool _isPushingDown = false;
-  double? _previousShoulderY;
-  double? _topShoulderY; // Reference Y when in plank/up position
-  static const double _pushupDepthThreshold = 40.0; // pixels of vertical movement
+  double? _previousNoseToWristDistance;
+  double? _maxNoseToWristDistance; // Reference distance when up
+  static const double _closeThreshold = 80.0; // pixels - how close nose gets to wrists when down
+  static const double _farThreshold = 120.0; // pixels - how far nose is from wrists when up
   
   // Throttling for logs
   DateTime? _lastLogTime;
   static const Duration _logThrottle = Duration(milliseconds: 200);
+  
+  // Calibration
+  List<double> _calibrationDistances = [];
+  static const int _calibrationFrames = 10;
 
   PushupsDetector({
     required this.targetReps,
@@ -26,79 +31,91 @@ class PushupsDetector {
     final now = DateTime.now();
     final shouldLog = _lastLogTime == null || now.difference(_lastLogTime!) >= _logThrottle;
     
-    // Get shoulder landmarks
-    final leftShoulder = pose.landmarks[PoseLandmarkType.leftShoulder];
-    final rightShoulder = pose.landmarks[PoseLandmarkType.rightShoulder];
+    // Get nose and wrist landmarks
+    final nose = pose.landmarks[PoseLandmarkType.nose];
+    final leftWrist = pose.landmarks[PoseLandmarkType.leftWrist];
+    final rightWrist = pose.landmarks[PoseLandmarkType.rightWrist];
     
-    // Need both shoulders detected
-    if (leftShoulder == null || rightShoulder == null) {
+    // Need all landmarks detected
+    if (nose == null || leftWrist == null || rightWrist == null) {
       if (shouldLog) {
-        print('⚠️ [Pushups] Shoulders not detected');
+        print('⚠️ [Pushups] Required landmarks not detected');
         _lastLogTime = now;
       }
       return;
     }
     
-    if (leftShoulder.likelihood < 0.7 || rightShoulder.likelihood < 0.7) {
+    if (nose.likelihood < 0.7 || leftWrist.likelihood < 0.6 || rightWrist.likelihood < 0.6) {
       if (shouldLog) {
-        print('⚠️ [Pushups] Low confidence - Left: ${(leftShoulder.likelihood * 100).toStringAsFixed(0)}%, Right: ${(rightShoulder.likelihood * 100).toStringAsFixed(0)}%');
+        print('⚠️ [Pushups] Low confidence - Nose: ${(nose.likelihood * 100).toStringAsFixed(0)}%, LW: ${(leftWrist.likelihood * 100).toStringAsFixed(0)}%, RW: ${(rightWrist.likelihood * 100).toStringAsFixed(0)}%');
         _lastLogTime = now;
       }
       return;
     }
 
-    // Calculate average shoulder Y position (vertical position)
-    final currentShoulderY = (leftShoulder.y + rightShoulder.y) / 2;
+    // Calculate distance from nose to wrists
+    // Average distance from nose to both wrists
+    final leftDistance = sqrt(pow(nose.x - leftWrist.x, 2) + pow(nose.y - leftWrist.y, 2));
+    final rightDistance = sqrt(pow(nose.x - rightWrist.x, 2) + pow(nose.y - rightWrist.y, 2));
+    final currentNoseToWristDistance = (leftDistance + rightDistance) / 2;
     
-    // Initialize top position (plank position) on first detection
-    if (_topShoulderY == null) {
-      _topShoulderY = currentShoulderY;
-      print('🔄 [Pushups] Initializing... Top (plank) shoulder position: ${currentShoulderY.toStringAsFixed(1)}');
-      _previousShoulderY = currentShoulderY;
+    // Calibrate max distance (plank/up position) over first few frames
+    if (_calibrationDistances.length < _calibrationFrames) {
+      _calibrationDistances.add(currentNoseToWristDistance);
+      if (shouldLog) {
+        print('🔄 [Pushups] Calibrating... Frame ${_calibrationDistances.length}/$_calibrationFrames | Nose-to-Wrist Distance: ${currentNoseToWristDistance.toStringAsFixed(1)}px');
+        _lastLogTime = now;
+      }
+      
+      if (_calibrationDistances.length == _calibrationFrames) {
+        // Calculate average as max distance (up position)
+        _maxNoseToWristDistance = _calibrationDistances.reduce((a, b) => a + b) / _calibrationDistances.length;
+        print('✅ [Pushups] Calibration complete! Max nose-to-wrist distance (up): ${_maxNoseToWristDistance!.toStringAsFixed(1)}px');
+      }
+      _previousNoseToWristDistance = currentNoseToWristDistance;
       return;
     }
     
     if (shouldLog) {
-      print('📍 [Pushups] Left Shoulder: (${leftShoulder.x.toStringAsFixed(0)}, ${leftShoulder.y.toStringAsFixed(0)}) | Right Shoulder: (${rightShoulder.x.toStringAsFixed(0)}, ${rightShoulder.y.toStringAsFixed(0)})');
-      print('📐 [Pushups] Avg Shoulder Y: ${currentShoulderY.toStringAsFixed(1)} | Top Y: ${_topShoulderY!.toStringAsFixed(1)} | Confidence: L${(leftShoulder.likelihood * 100).toStringAsFixed(0)}% R${(rightShoulder.likelihood * 100).toStringAsFixed(0)}%');
+      print('📍 [Pushups] Nose: (${nose.x.toStringAsFixed(0)}, ${nose.y.toStringAsFixed(0)}) | LW: (${leftWrist.x.toStringAsFixed(0)}, ${leftWrist.y.toStringAsFixed(0)}) | RW: (${rightWrist.x.toStringAsFixed(0)}, ${rightWrist.y.toStringAsFixed(0)})');
+      print('📐 [Pushups] Nose-to-Wrist Distance: ${currentNoseToWristDistance.toStringAsFixed(1)}px | Max: ${_maxNoseToWristDistance!.toStringAsFixed(1)}px | L: ${leftDistance.toStringAsFixed(1)}px R: ${rightDistance.toStringAsFixed(1)}px');
     }
 
-    if (_previousShoulderY != null) {
-      // Calculate vertical movement from top position
-      // In pushups, Y increases when going down (moving away from top of frame)
-      final verticalDrop = currentShoulderY - _topShoulderY!;
-      final deltaY = currentShoulderY - _previousShoulderY!;
-      
+    if (_previousNoseToWristDistance != null && _maxNoseToWristDistance != null) {
       if (shouldLog) {
-        print('📊 [Pushups] Vertical Drop: ${verticalDrop.toStringAsFixed(1)}px | Delta Y: ${deltaY.toStringAsFixed(1)}px | Threshold: $_pushupDepthThreshold px | State: ${_isPushingDown ? "DOWN" : "UP"}');
+        print('📊 [Pushups] Close Threshold: $_closeThreshold px | Far Threshold: $_farThreshold px | State: ${_isPushingDown ? "DOWN" : "UP"}');
         _lastLogTime = now;
       }
 
-      // Detect pushup down (shoulders drop/move down significantly)
-      if (!_isPushingDown && verticalDrop > _pushupDepthThreshold) {
-        _isPushingDown = true;
-        print('⬇️ [Pushups] ✅ PUSHUP DOWN DETECTED! Drop: ${verticalDrop.toStringAsFixed(1)}px');
-      }
-      // Detect pushup up (shoulders return to top position)
-      else if (_isPushingDown && verticalDrop < _pushupDepthThreshold / 2) {
-        _isPushingDown = false;
-        _currentReps++;
-        print('⬆️ [Pushups] ✅ PUSHUP COMPLETED! Returned to: ${verticalDrop.toStringAsFixed(1)}px from top');
-        print('🎯 [Pushups] REP COMPLETED! Total Reps: $_currentReps/$targetReps');
-        
-        // Update top reference (in case user adjusts position slightly)
-        _topShoulderY = currentShoulderY;
-        
-        onRepComplete(_currentReps);
+      // Detect based on nose-to-wrist distance
+      if (!_isPushingDown) {
+        // Detect pushup down (nose getting close to wrists)
+        if (currentNoseToWristDistance < _closeThreshold) {
+          _isPushingDown = true;
+          print('⬇️ [Pushups] ✅ PUSHUP DOWN DETECTED! Nose close to wrists: ${currentNoseToWristDistance.toStringAsFixed(1)}px');
+        }
+      } else {
+        // Detect pushup up (nose moving far from wrists)
+        if (currentNoseToWristDistance > _farThreshold) {
+          _isPushingDown = false;
+          _currentReps++;
+          print('⬆️ [Pushups] ✅ PUSHUP COMPLETED! Nose far from wrists: ${currentNoseToWristDistance.toStringAsFixed(1)}px');
+          print('🎯 [Pushups] REP COMPLETED! Total Reps: $_currentReps/$targetReps');
+          
+          // Update max distance slightly (account for small adjustments)
+          _maxNoseToWristDistance = (_maxNoseToWristDistance! * 0.9) + (currentNoseToWristDistance * 0.1);
+          
+          onRepComplete(_currentReps);
 
-        if (_currentReps >= targetReps) {
-          print('🎉 [Pushups] 🏆 EXERCISE COMPLETE! All $_currentReps reps done!');
-          onExerciseComplete();
+          if (_currentReps >= targetReps) {
+            print('🎉 [Pushups] 🏆 EXERCISE COMPLETE! All $_currentReps reps done!');
+            onExerciseComplete();
+          }
         }
       }
     }
 
-    _previousShoulderY = currentShoulderY;
+    _previousNoseToWristDistance = currentNoseToWristDistance;
   }
 
   double _calculateAngle(Point<double> a, Point<double> b, Point<double> c) {
@@ -120,7 +137,8 @@ class PushupsDetector {
   void reset() {
     _currentReps = 0;
     _isPushingDown = false;
-    _previousShoulderY = null;
-    _topShoulderY = null;
+    _previousNoseToWristDistance = null;
+    _maxNoseToWristDistance = null;
+    _calibrationDistances.clear();
   }
 }

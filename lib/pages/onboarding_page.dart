@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:introduction_screen/introduction_screen.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:usage_stats/usage_stats.dart';
 import 'dashboard_page.dart';
 
 class OnboardingPage extends StatelessWidget {
@@ -41,9 +42,9 @@ class OnboardingPage extends StatelessWidget {
           ),
         ),
         PageViewModel(
-          title: "Camera Permission Required",
+          title: "Permissions Required",
           body:
-              "We need camera access to track your exercises using pose detection. Your privacy is important - video is processed locally and never stored or shared.",
+              "We need camera access to track your exercises and usage stats permission to monitor your apps. Your privacy is important - all data is processed locally and never shared.",
           image: Center(
             child: Container(
               width: 200,
@@ -53,7 +54,7 @@ class OnboardingPage extends StatelessWidget {
                 shape: BoxShape.circle,
               ),
               child: Icon(
-                Icons.camera_alt,
+                Icons.security,
                 size: 100,
                 color: Theme.of(context).colorScheme.secondary,
               ),
@@ -91,74 +92,116 @@ class OnboardingPage extends StatelessWidget {
 
   Future<void> _completeOnboarding(BuildContext context) async {
     // Request camera permission
-    final status = await Permission.camera.request();
+    final cameraStatus = await Permission.camera.request();
+    final cameraGranted = cameraStatus.isGranted;
+    
+    // Check usage stats permission
+    bool usageGranted = false;
+    try {
+      usageGranted = await UsageStats.checkUsagePermission() ?? false;
+    } catch (e) {
+      usageGranted = false;
+    }
     
     if (!context.mounted) return;
     
-    // Check if permission was granted
-    if (status.isGranted) {
-      // Mark onboarding as completed
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('hasSeenOnboarding', true);
-
-      // Navigate to dashboard
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const DashboardPage()),
+    if (!cameraGranted || !usageGranted) {
+      // Show dialog explaining that permissions are required
+      final result = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('Permissions Required'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Both permissions are required for the app to function:\n'),
+                Row(
+                  children: [
+                    Icon(
+                      cameraGranted ? Icons.check_circle : Icons.cancel,
+                      color: cameraGranted ? Colors.green : Colors.red,
+                    ),
+                    const SizedBox(width: 8),
+                    const Expanded(child: Text('Camera Access')),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Icon(
+                      usageGranted ? Icons.check_circle : Icons.cancel,
+                      color: usageGranted ? Colors.green : Colors.red,
+                    ),
+                    const SizedBox(width: 8),
+                    const Expanded(child: Text('Usage Stats Access')),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                if (!usageGranted)
+                  const Text(
+                    'Tap "Grant Usage Access" to enable usage stats permission.\n\n'
+                    'You will be taken to Android Settings where you need to:\n'
+                    '1. Find "Push2Unlock" in the list\n'
+                    '2. Toggle the switch to enable it\n'
+                    '3. Return to the app and tap "Try Again"',
+                    style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+                  ),
+                if (!cameraGranted)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8.0),
+                    child: Text(
+                      'Camera permission can be granted directly in the app.',
+                      style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context, 'cancel');
+              },
+              child: const Text('Cancel'),
+            ),
+            if (!usageGranted)
+              ElevatedButton(
+                onPressed: () async {
+                  // Request usage stats permission - this opens settings
+                  await UsageStats.grantUsagePermission();
+                  if (!context.mounted) return;
+                  Navigator.pop(context, 'granted');
+                },
+                child: const Text('Grant Usage Access'),
+              ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context, 'retry');
+              },
+              child: const Text('Try Again'),
+            ),
+          ],
+        ),
       );
-    } else if (status.isDenied) {
-      // Show dialog explaining why permission is needed
-      _showPermissionDialog(context);
-    } else if (status.isPermanentlyDenied) {
-      // Guide user to app settings
-      _showSettingsDialog(context);
+      
+      if (result == 'retry' || result == 'granted') {
+        // Retry permission check
+        await _completeOnboarding(context);
+      }
+      return;
     }
-  }
+    
+    // Mark onboarding as completed
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('hasSeenOnboarding', true);
 
-  void _showPermissionDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Camera Permission Required'),
-        content: const Text(
-          'Camera access is essential for tracking your exercises. Please grant permission to continue.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _completeOnboarding(context);
-            },
-            child: const Text('Try Again'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showSettingsDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Permission Required'),
-        content: const Text(
-          'Camera permission is permanently denied. Please enable it in app settings to use Push2Unlock.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              openAppSettings();
-              Navigator.pop(context);
-            },
-            child: const Text('Open Settings'),
-          ),
-        ],
-      ),
+    // Navigate to dashboard
+    if (!context.mounted) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const DashboardPage()),
     );
   }
 }

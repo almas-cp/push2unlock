@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:usage_stats/usage_stats.dart';
 import 'settings_page.dart';
+import '../services/foreground_app_detector.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -12,11 +14,24 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   bool _isServiceRunning = false;
   List<MonitoredApp> _monitoredApps = [];
+  final ForegroundAppDetector _appDetector = ForegroundAppDetector();
+  bool _hasUsagePermission = false;
 
   @override
   void initState() {
     super.initState();
+    print('✅ Dashboard loaded successfully!');
     _loadMonitoredApps();
+    _checkUsagePermission();
+  }
+
+  Future<void> _checkUsagePermission() async {
+    final hasPermission = await UsageStats.checkUsagePermission();
+    print('🔍 Usage permission check result: $hasPermission');
+    setState(() {
+      _hasUsagePermission = hasPermission ?? false;
+    });
+    print('📋 Permission state updated: $_hasUsagePermission');
   }
 
   Future<void> _loadMonitoredApps() async {
@@ -47,21 +62,68 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  void _toggleService() {
+  Future<void> _toggleService() async {
+    print('🔘 Start/Stop button pressed! Current state: ${_isServiceRunning ? "Running" : "Stopped"}');
+    print('📊 Has usage permission: $_hasUsagePermission');
+    
+    if (!_isServiceRunning && !_hasUsagePermission) {
+      // Permission not granted, show dialog
+      final shouldRequest = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('⚠️ Permission Required'),
+          content: const Text(
+            'Usage Stats permission is required to monitor foreground apps.\n\n'
+            'Please grant the permission in Settings to enable monitoring.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Grant Permission'),
+            ),
+          ],
+        ),
+      );
+      
+      if (shouldRequest == true) {
+        await UsageStats.grantUsagePermission();
+        await _checkUsagePermission();
+      }
+      return;
+    }
+    
     setState(() {
       _isServiceRunning = !_isServiceRunning;
     });
     
+    // Start or stop foreground app monitoring
+    if (_isServiceRunning) {
+      await _appDetector.startMonitoring();
+    } else {
+      _appDetector.stopMonitoring();
+    }
+    
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           _isServiceRunning
-              ? 'Monitoring service started'
-              : 'Monitoring service stopped',
+              ? '✅ Monitoring started - Check terminal logs!'
+              : '⏸️ Monitoring stopped',
         ),
         duration: const Duration(seconds: 2),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _appDetector.dispose();
+    super.dispose();
   }
 
   @override

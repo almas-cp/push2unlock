@@ -91,16 +91,74 @@ class OnboardingPage extends StatelessWidget {
 
   Future<void> _completeOnboarding(BuildContext context) async {
     // Request camera permission
-    await Permission.camera.request();
+    final status = await Permission.camera.request();
     
-    // Mark onboarding as completed
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('hasSeenOnboarding', true);
-
-    // Navigate to dashboard
     if (!context.mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const DashboardPage()),
+    
+    // Check if permission was granted
+    if (status.isGranted) {
+      // Mark onboarding as completed
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('hasSeenOnboarding', true);
+
+      // Navigate to dashboard
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const DashboardPage()),
+      );
+    } else if (status.isDenied) {
+      // Show dialog explaining why permission is needed
+      _showPermissionDialog(context);
+    } else if (status.isPermanentlyDenied) {
+      // Guide user to app settings
+      _showSettingsDialog(context);
+    }
+  }
+
+  void _showPermissionDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Camera Permission Required'),
+        content: const Text(
+          'Camera access is essential for tracking your exercises. Please grant permission to continue.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _completeOnboarding(context);
+            },
+            child: const Text('Try Again'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSettingsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Permission Required'),
+        content: const Text(
+          'Camera permission is permanently denied. Please enable it in app settings to use Push2Unlock.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              openAppSettings();
+              Navigator.pop(context);
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
     );
   }
 }

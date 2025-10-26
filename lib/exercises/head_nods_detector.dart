@@ -7,13 +7,23 @@ class HeadNodsDetector {
   final Function() onExerciseComplete;
 
   int _currentReps = 0;
-  bool _isTurningRight = false;
+  String _currentState = 'NEUTRAL'; // NEUTRAL, TURNED_LEFT, TURNED_RIGHT
   double? _previousHeadAngle;
-  static const double _rotationThreshold = 15.0; // degrees of head rotation
+  double? _neutralAngle; // Reference angle when head is centered
+  static const double _turnThreshold = 40.0; // degrees to detect turn (increased for better accuracy)
+  static const double _returnThreshold = 15.0; // degrees to return to center
   
   // Throttling for logs
   DateTime? _lastLogTime;
   static const Duration _logThrottle = Duration(milliseconds: 200);
+  
+  // Cooldown to prevent rapid counting
+  DateTime? _lastRepTime;
+  static const Duration _repCooldown = Duration(milliseconds: 500);
+  
+  // Calibration for neutral angle
+  List<double> _calibrationAngles = [];
+  static const int _calibrationFrames = 10;
 
   HeadNodsDetector({
     required this.targetReps,
@@ -58,31 +68,64 @@ class HeadNodsDetector {
     final deltaY = nose.y - earMidpointY;
     final currentHeadAngle = atan2(deltaX, deltaY) * (180 / pi);
     
+    // Calibrate neutral angle over first few frames
+    if (_calibrationAngles.length < _calibrationFrames) {
+      _calibrationAngles.add(currentHeadAngle);
+      if (shouldLog) {
+        print('🔄 [HeadNods] Calibrating... Frame ${_calibrationAngles.length}/$_calibrationFrames | Angle: ${currentHeadAngle.toStringAsFixed(1)}°');
+        _lastLogTime = now;
+      }
+      
+      if (_calibrationAngles.length == _calibrationFrames) {
+        // Calculate average as neutral angle
+        _neutralAngle = _calibrationAngles.reduce((a, b) => a + b) / _calibrationAngles.length;
+        print('✅ [HeadNods] Calibration complete! Neutral angle: ${_neutralAngle!.toStringAsFixed(1)}°');
+      }
+      _previousHeadAngle = currentHeadAngle;
+      return;
+    }
+    
     if (shouldLog) {
-      print('📐 [HeadNods] Head Rotation: ${currentHeadAngle.toStringAsFixed(1)}° | Confidence: ${(nose.likelihood * 100).toStringAsFixed(0)}%');
+      print('📐 [HeadNods] Head Rotation: ${currentHeadAngle.toStringAsFixed(1)}° | Neutral: ${_neutralAngle!.toStringAsFixed(1)}° | Confidence: ${(nose.likelihood * 100).toStringAsFixed(0)}%');
       print('📍 [HeadNods] Nose: (${nose.x.toStringAsFixed(0)}, ${nose.y.toStringAsFixed(0)}) | Left Ear: (${leftEar.x.toStringAsFixed(0)}, ${leftEar.y.toStringAsFixed(0)}) | Right Ear: (${rightEar.x.toStringAsFixed(0)}, ${rightEar.y.toStringAsFixed(0)})');
     }
 
-    if (_previousHeadAngle != null) {
-      final angleDelta = currentHeadAngle - _previousHeadAngle!;
-      final absAngleDelta = angleDelta.abs();
+    if (_previousHeadAngle != null && _neutralAngle != null) {
+      final deviationFromNeutral = currentHeadAngle - _neutralAngle!;
+      final absDeviation = deviationFromNeutral.abs();
       
       if (shouldLog) {
-        print('📊 [HeadNods] Angle Delta: ${angleDelta.toStringAsFixed(1)}° | Abs: ${absAngleDelta.toStringAsFixed(1)}° | Threshold: $_rotationThreshold° | State: ${_isTurningRight ? "TURNING_RIGHT" : "NEUTRAL"}');
+        print('📊 [HeadNods] Deviation: ${deviationFromNeutral.toStringAsFixed(1)}° | Abs: ${absDeviation.toStringAsFixed(1)}° | Turn Threshold: $_turnThreshold° | Return Threshold: $_returnThreshold° | State: $_currentState');
         _lastLogTime = now;
       }
 
-      // Detect rightward turn (positive angle change)
-      if (!_isTurningRight && angleDelta > _rotationThreshold) {
-        _isTurningRight = true;
-        print('👉 [HeadNods] ✅ RIGHT TURN DETECTED! Rotation: +${angleDelta.toStringAsFixed(1)}°');
+      // Check cooldown
+      final canCountRep = _lastRepTime == null || now.difference(_lastRepTime!) >= _repCooldown;
+
+      // State machine for turn detection
+      if (_currentState == 'NEUTRAL') {
+        // Detect left turn (negative deviation)
+        if (deviationFromNeutral < -_turnThreshold) {
+          _currentState = 'TURNED_LEFT';
+          print('👈 [HeadNods] ✅ LEFT TURN DETECTED! Deviation: ${deviationFromNeutral.toStringAsFixed(1)}° from neutral');
+        }
+        // Detect right turn (positive deviation)
+        else if (deviationFromNeutral > _turnThreshold) {
+          _currentState = 'TURNED_RIGHT';
+          print('👉 [HeadNods] ✅ RIGHT TURN DETECTED! Deviation: +${deviationFromNeutral.toStringAsFixed(1)}° from neutral');
+        }
       }
-      // Detect leftward turn completion (negative angle change)
-      else if (_isTurningRight && angleDelta < -_rotationThreshold) {
-        _isTurningRight = false;
+      // Return to center from any turn
+      else if (absDeviation < _returnThreshold && canCountRep) {
+        final direction = _currentState == 'TURNED_LEFT' ? 'left' : 'right';
+        _currentState = 'NEUTRAL';
         _currentReps++;
-        print('👈 [HeadNods] ✅ LEFT TURN COMPLETED! Rotation: ${angleDelta.toStringAsFixed(1)}°');
+        _lastRepTime = now;
+        print('↩️ [HeadNods] ✅ RETURNED TO CENTER from $direction! Deviation: ${deviationFromNeutral.toStringAsFixed(1)}°');
         print('🎯 [HeadNods] REP COMPLETED! Total Reps: $_currentReps/$targetReps');
+        
+        // Update neutral angle slightly (account for small movements)
+        _neutralAngle = (_neutralAngle! * 0.9) + (currentHeadAngle * 0.1);
         
         onRepComplete(_currentReps);
 
@@ -91,8 +134,6 @@ class HeadNodsDetector {
           onExerciseComplete();
         }
       }
-    } else {
-      print('🔄 [HeadNods] Initializing... First frame detected');
     }
 
     _previousHeadAngle = currentHeadAngle;
@@ -100,7 +141,10 @@ class HeadNodsDetector {
 
   void reset() {
     _currentReps = 0;
-    _isTurningRight = false;
+    _currentState = 'NEUTRAL';
     _previousHeadAngle = null;
+    _neutralAngle = null;
+    _lastRepTime = null;
+    _calibrationAngles.clear();
   }
 }

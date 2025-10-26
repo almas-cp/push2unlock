@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'exercise_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -288,9 +289,64 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const SizedBox(height: 24),
+
+          // Test Exercise Section
+          _buildSectionHeader('Test Exercise'),
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Try out your exercise settings before using the app lock feature.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Colors.grey[600],
+                        ),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: _testExercise,
+                    icon: const Icon(Icons.fitness_center),
+                    label: Text('Test $_selectedExercise ($_selectedRepCount reps)'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
         ],
       ),
     );
+  }
+
+  Future<void> _testExercise() async {
+    // Navigate to exercise page with test mode
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ExercisePage(
+          exerciseType: _selectedExercise,
+          repCount: _selectedRepCount,
+          rewardTime: _selectedRewardTime,
+        ),
+      ),
+    );
+    
+    // Show success message when returning from exercise page
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ Exercise test completed!'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   Widget _buildSectionHeader(String title) {
